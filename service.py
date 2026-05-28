@@ -10,6 +10,7 @@ import shutil
 import unicodedata
 import os.path
 import re
+import zipfile
 
 import xbmc, xbmcvfs, xbmcaddon, xbmcgui, xbmcplugin
 
@@ -85,6 +86,8 @@ ARCHIVE_EXTENSIONS = [
     '.rar',
     '.cbr'
 ]
+
+SUBTITLE_EXTENSIONS = ('.srt', '.sub', '.ssa', '.ass', '.vtt', '.smi', '.idx')
 
 LANGUAGES = {
     "albán": "Albanian",
@@ -367,6 +370,29 @@ def is_match(item, filename):
     return False
 
 
+def extract_subtitle_from_zip(zip_path, item):
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            for name in zf.namelist():
+                if name.endswith('/'):
+                    continue
+                basename = os.path.basename(name)
+                if not basename.lower().endswith(SUBTITLE_EXTENSIONS):
+                    continue
+                if is_match(item, basename):
+                    target = os.path.join(__temp__, basename)
+                    with zf.open(name) as src, open(target, 'wb') as dst:
+                        shutil.copyfileobj(src, dst)
+                    debuglog("Extracted subtitle from zip: %s" % target)
+                    return target
+            debuglog("No matching subtitle in zip %s" % zip_path)
+    except zipfile.BadZipFile as e:
+        debuglog("Bad zip file %s: %s" % (zip_path, str(e)))
+    except Exception as e:
+        debuglog("Error extracting zip %s: %s" % (zip_path, repr(e)))
+    return None
+
+
 def recursive_search(path):
     (dirs, files) = xbmcvfs.listdir(path)
     if files:
@@ -389,11 +415,15 @@ def download(item):
 
     if is_archive(downloaded):
         debuglog('%s downloaded file is an archive' % downloaded)
-        archive = 'archive://%s' % quote_plus(downloaded)
-        subtitle = recursive_search(archive)
+
+        if downloaded.lower().endswith('.zip'):
+            subtitle = extract_subtitle_from_zip(downloaded, item)
 
         if not subtitle:
-            debuglog("No subtitle found by search. Open dialog from %s" % archive)
+            archive = 'archive://%s' % quote_plus(downloaded)
+            subtitle = recursive_search(archive)
+            if not subtitle:
+                debuglog("No subtitle found by search. Open dialog from %s" % archive)
     else:
         subtitle = downloaded
 
